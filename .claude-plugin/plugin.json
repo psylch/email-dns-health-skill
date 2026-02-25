@@ -1,0 +1,10 @@
+{
+  "name": "email-dns-health",
+  "description": "Audit and validate email DNS records (SPF, DKIM, DMARC, BIMI, MTA-STS, MX) for any domain. Detect email providers, count SPF DNS lookups, grade overall health A-F, and provide fix guidance. Use when the user says 'check email DNS', 'audit SPF/DKIM/DMARC', 'email deliverability check', 'detect email provider', 'fix email DNS', 'setup email records', or 'email health score'.",
+  "version": "1.0.0",
+  "author": {
+    "name": "psylch"
+  },
+  "homepage": "https://github.com/psylch/email-dns-health-skill",
+  "license": "MIT"
+}
