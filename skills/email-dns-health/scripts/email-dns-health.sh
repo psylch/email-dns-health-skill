@@ -267,6 +267,8 @@ cmd_check_spf() {
   if [[ -z "$spf" ]]; then
     jq -n --arg domain "$domain" '{
       status: "missing",
+      score: 0,
+      max_score: 30,
       domain: $domain,
       record: null,
       lookup_count: 0,
@@ -317,18 +319,22 @@ cmd_check_spf() {
   fi
 
   local status="ok"
+  local spf_score=30
   local issue_count
   issue_count=$(echo "$issues" | jq 'length')
   if [[ "$issue_count" -gt 0 ]]; then
     if [[ "$lookup_count" -gt 10 ]] || echo "$qualifier" | grep -q "DANGEROUS"; then
       status="critical"
+      spf_score=0
     else
       status="warning"
+      spf_score=20
     fi
   fi
 
   jq -n \
     --arg status "$status" \
+    --argjson score "$spf_score" \
     --arg domain "$domain" \
     --arg record "$spf" \
     --argjson lookup_count "$lookup_count" \
@@ -337,6 +343,8 @@ cmd_check_spf() {
     --argjson issues "$issues" \
     '{
       status: $status,
+      score: $score,
+      max_score: 30,
       domain: $domain,
       record: $record,
       lookup_count: $lookup_count,
@@ -374,7 +382,7 @@ cmd_check_dkim() {
 
         # Estimate key length from p= value
         local pubkey
-        pubkey=$(echo "$dkim" | grep -oE 'p=[A-Za-z0-9+/=]+' | sed 's/p=//' || true)
+        pubkey=$(echo "$dkim" | tr -d ' \t\n\r' | grep -oE 'p=[A-Za-z0-9+/=]+' | sed 's/p=//' || true)
         if [[ -n "$pubkey" ]]; then
           local keylen=${#pubkey}
           # Base64 encoded key length estimation
@@ -435,7 +443,7 @@ cmd_check_dkim() {
           [[ -z "$algorithm" ]] && algorithm="rsa"
           flags=$(echo "$dkim" | grep -oiE 't=[^;]+' | sed 's/t=//' || true)
           local pubkey
-          pubkey=$(echo "$dkim" | grep -oE 'p=[A-Za-z0-9+/=]+' | sed 's/p=//' || true)
+          pubkey=$(echo "$dkim" | tr -d ' \t\n\r' | grep -oE 'p=[A-Za-z0-9+/=]+' | sed 's/p=//' || true)
           if [[ -n "$pubkey" ]]; then
             local keylen=${#pubkey}
             if [[ "$keylen" -gt 350 ]]; then
@@ -483,20 +491,26 @@ cmd_check_dkim() {
   fi
 
   local status="ok"
+  local dkim_score=30
   if [[ "$found_count" -eq 0 ]]; then
     status="missing"
+    dkim_score=0
   elif [[ $(echo "$issues" | jq 'length') -gt 0 ]]; then
     status="warning"
+    dkim_score=20
   fi
 
   jq -n \
     --arg status "$status" \
+    --argjson score "$dkim_score" \
     --arg domain "$domain" \
     --argjson keys "$results" \
     --argjson issues "$issues" \
     --argjson found_count "$found_count" \
     '{
       status: $status,
+      score: $score,
+      max_score: 30,
       domain: $domain,
       keys_found: $found_count,
       keys: $keys,
@@ -513,6 +527,8 @@ cmd_check_dmarc() {
   if [[ -z "$dmarc" ]]; then
     jq -n --arg domain "$domain" '{
       status: "missing",
+      score: 0,
+      max_score: 40,
       domain: $domain,
       record: null,
       policy: null,
@@ -536,11 +552,17 @@ cmd_check_dmarc() {
 
   local issues="[]"
   local status="ok"
+  local dmarc_score=40
 
   if [[ "$policy" == "none" ]]; then
     issues=$(echo "$issues" | jq '. + ["DMARC policy is none (monitoring only). Advance to quarantine when compliance > 98%."]')
     status="warning"
+    dmarc_score=15
+  elif [[ "$policy" == "quarantine" ]]; then
+    dmarc_score=33
   fi
+  # reject = 40 (default)
+
   if [[ -z "$rua" ]]; then
     issues=$(echo "$issues" | jq '. + ["No aggregate report address (rua). Add rua= to receive DMARC reports."]')
   fi
@@ -550,6 +572,7 @@ cmd_check_dmarc() {
 
   jq -n \
     --arg status "$status" \
+    --argjson score "$dmarc_score" \
     --arg domain "$domain" \
     --arg record "$dmarc" \
     --arg policy "${policy:-none}" \
@@ -560,6 +583,8 @@ cmd_check_dmarc() {
     --argjson issues "$issues" \
     '{
       status: $status,
+      score: $score,
+      max_score: 40,
       domain: $domain,
       record: $record,
       policy: $policy,
@@ -630,6 +655,9 @@ cmd_check_bimi() {
   if [[ -z "$bimi" ]] || ! echo "$bimi" | grep -qi "v=BIMI1"; then
     jq -n --arg domain "$domain" '{
       status: "missing",
+      score: 0,
+      max_score: 10,
+      bonus: true,
       domain: $domain,
       record: null,
       logo: null,
@@ -650,6 +678,9 @@ cmd_check_bimi() {
     --arg vmc "${vmc:-none}" \
     '{
       status: "ok",
+      score: 10,
+      max_score: 10,
+      bonus: true,
       domain: $domain,
       record: $record,
       logo: $logo,
@@ -666,6 +697,9 @@ cmd_check_mta_sts() {
   if [[ -z "$mta_sts" ]] || ! echo "$mta_sts" | grep -qi "v=STSv1"; then
     jq -n --arg domain "$domain" '{
       status: "missing",
+      score: 0,
+      max_score: 10,
+      bonus: true,
       domain: $domain,
       record: null,
       hint: "No MTA-STS record found."
@@ -678,6 +712,9 @@ cmd_check_mta_sts() {
     --arg record "$mta_sts" \
     '{
       status: "ok",
+      score: 10,
+      max_score: 10,
+      bonus: true,
       domain: $domain,
       record: $record,
       hint: "MTA-STS: present"
@@ -699,73 +736,17 @@ cmd_audit() {
   mx_records=$(dig_mx "$domain" || true)
   provider_result=$(cmd_detect_provider "$domain")
 
-  # Calculate grade
-  local score=0
-  local max_score=100
+  # Sum scores from each check (120-point scale)
+  # Core (SPF 30 + DKIM 30 + DMARC 40) = 100 — determines deliverability
+  # Bonus (BIMI 10 + MTA-STS 10) = 20 — nice-to-have
+  local score
+  score=$(echo "$spf_result $dkim_result $dmarc_result $bimi_result $mta_sts_result" \
+    | jq -s '[.[].score] | add')
 
-  # SPF: 25 points
-  local spf_status
-  spf_status=$(echo "$spf_result" | jq -r '.status')
-  case "$spf_status" in
-    ok) score=$((score + 25)) ;;
-    warning) score=$((score + 15)) ;;
-    *) ;;
-  esac
-
-  # DKIM: 25 points
-  local dkim_status dkim_key_count
-  dkim_status=$(echo "$dkim_result" | jq -r '.status')
-  dkim_key_count=$(echo "$dkim_result" | jq '.keys_found')
-  case "$dkim_status" in
-    ok)
-      score=$((score + 25))
-      # Bonus for 2048-bit keys
-      local has_strong
-      has_strong=$(echo "$dkim_result" | jq '[.keys[] | select(.key_length == "2048")] | length')
-      if [[ "$has_strong" -gt 0 ]]; then
-        score=$((score + 0))  # Already included in base
-      fi
-      ;;
-    warning) score=$((score + 15)) ;;
-    *) ;;
-  esac
-
-  # DMARC: 30 points
-  local dmarc_status dmarc_policy
-  dmarc_status=$(echo "$dmarc_result" | jq -r '.status')
-  dmarc_policy=$(echo "$dmarc_result" | jq -r '.policy // "none"')
-  case "$dmarc_status" in
-    ok)
-      case "$dmarc_policy" in
-        reject) score=$((score + 30)) ;;
-        quarantine) score=$((score + 25)) ;;
-        none) score=$((score + 10)) ;;
-        *) score=$((score + 10)) ;;
-      esac
-      ;;
-    warning) score=$((score + 10)) ;;
-    *) ;;
-  esac
-
-  # BIMI: 10 points
-  local bimi_status
-  bimi_status=$(echo "$bimi_result" | jq -r '.status')
-  if [[ "$bimi_status" == "ok" ]]; then
-    score=$((score + 10))
-  fi
-
-  # MTA-STS: 10 points
-  local mta_sts_status
-  mta_sts_status=$(echo "$mta_sts_result" | jq -r '.status')
-  if [[ "$mta_sts_status" == "ok" ]]; then
-    score=$((score + 10))
-  fi
-
-  # Determine grade
   local grade
-  if [[ "$score" -ge 90 ]]; then
+  if [[ "$score" -ge 100 ]]; then
     grade="A"
-  elif [[ "$score" -ge 75 ]]; then
+  elif [[ "$score" -ge 80 ]]; then
     grade="B"
   elif [[ "$score" -ge 60 ]]; then
     grade="C"
@@ -809,7 +790,11 @@ cmd_audit() {
       domain: $domain,
       grade: $grade,
       score: $score,
-      max_score: 100,
+      max_score: 120,
+      core_score: (if $score > 100 then 100 else $score end),
+      core_max: 100,
+      bonus_score: (if $score > 100 then ($score - 100) else 0 end),
+      bonus_max: 20,
       spf: $spf,
       dkim: $dkim,
       dmarc: $dmarc,
@@ -819,7 +804,7 @@ cmd_audit() {
       provider: $provider,
       issues: $issues,
       issue_count: ($issues | length),
-      hint: ($domain + ": Grade " + $grade + " (" + ($score|tostring) + "/100) — " + (($issues | length)|tostring) + " issue(s)")
+      hint: ($domain + ": Grade " + $grade + " (" + ($score|tostring) + "/120, core " + (if $score > 100 then "100" else ($score|tostring) end) + "/100) — " + (($issues | length)|tostring) + " issue(s)")
     }'
 }
 

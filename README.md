@@ -55,21 +55,21 @@ The skill activates automatically when you mention email DNS topics. Example pro
 [Email DNS Health] Audit Complete
 
 Domain: example.com
-Grade: B
+Grade: A
+Score: 100/120 (core 100/100 + bonus 0/20)
 
-Records:
-  SPF:     ✓ valid (7/10 lookups)
-  DKIM:    ✓ valid (2048-bit RSA)
-  DMARC:   ⚠ weak (policy: none)
-  BIMI:    ✗ missing
-  MTA-STS: ✗ missing
-  MX:      ✓ valid (provider: Google Workspace)
+Core (determines deliverability):
+  SPF:     ✓ valid (7/10 lookups)              30/30
+  DKIM:    ✓ valid (2048-bit RSA)              30/30
+  DMARC:   ✓ strong (policy: reject)           40/40
 
-Issues: 3
-Recommendations:
-  1. Advance DMARC policy from "none" to "quarantine"
-  2. Add BIMI record for brand logo in email clients
-  3. Deploy MTA-STS to enforce TLS
+Bonus (nice-to-have):
+  BIMI:    ✗ missing                            0/10
+  MTA-STS: ✗ missing                            0/10
+
+MX: ✓ valid (provider: Google Workspace)
+
+Issues: 0
 ```
 
 ## License

@@ -117,14 +117,18 @@ After `audit` or `fix` commands, present:
 
 Domain: <domain>
 Grade: <A-F>
+Score: <score>/120 (core <core>/100 + bonus <bonus>/20)
 
-Records:
-  SPF:    <status> (<lookup_count>/10 lookups)
-  DKIM:   <status> (<key_length>-bit <algorithm>)
-  DMARC:  <status> (policy: <policy>)
-  BIMI:   <status>
-  MTA-STS: <status>
-  MX:     <status> (provider: <provider>)
+Core (determines deliverability):
+  SPF:    <status> (<lookup_count>/10 lookups)     /30
+  DKIM:   <status> (<key_length>-bit <algorithm>)  /30
+  DMARC:  <status> (policy: <policy>)              /40
+
+Bonus (nice-to-have):
+  BIMI:    <status>                                /10
+  MTA-STS: <status>                                /10
+
+MX: <status> (provider: <provider>)
 
 Issues: <count>
 Recommendations:
