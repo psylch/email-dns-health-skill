@@ -1,6 +1,6 @@
 ---
 name: email-dns-health
-description: "Audit and validate email DNS records (SPF, DKIM, DMARC, BIMI, MTA-STS, MX) for any domain. Detect email providers, count SPF DNS lookups, grade overall health A-F, and provide fix guidance. Use when the user says 'check email DNS', 'audit SPF/DKIM/DMARC', 'email deliverability check', 'detect email provider', 'fix email DNS', 'setup email records', or 'email health score'."
+description: "Audit and validate email DNS records (SPF, DKIM, DMARC, BIMI, MTA-STS, MX) for any domain. Detect email providers, count SPF DNS lookups, grade overall health A-F, and provide fix guidance. Use when the user says 'check email DNS', 'audit SPF/DKIM/DMARC', 'email deliverability check', 'detect email provider', 'fix email DNS', 'setup email records', 'email health score', or 'update DNS records'."
 ---
 
 # Email DNS Health
@@ -23,7 +23,6 @@ A zero-dependency email DNS health checker that uses `dig` and `jq` to audit SPF
 | `check-dmarc` | `check-dmarc <domain>` | DMARC policy validation |
 | `detect-provider` | `detect-provider <domain>` | Detect email provider from MX/SPF |
 | `setup-guide` | `setup-guide <provider>` | DNS setup guide for a provider |
-| `fix` | `fix <domain>` | Interactive fix workflow (Cloudflare API) |
 
 ## Workflow
 
@@ -61,7 +60,7 @@ Map the user's request to a command:
 | "Check DMARC" / "DMARC policy" | `check-dmarc` |
 | "What email provider" / "detect provider" | `detect-provider` |
 | "How to set up email for [provider]" | `setup-guide` |
-| "Fix email DNS" / "update records" | `fix` |
+| "Fix email DNS" / "update records" | Run `audit` first, then follow fix guidance in Step 4 |
 
 ### Step 3: Execute Command
 
@@ -89,12 +88,12 @@ Format the JSON output into a human-readable report:
 
 **For `setup-guide`**: Read `{SKILL_DIR}/references/provider-configs.md` and present the step-by-step guide for the requested provider.
 
-**For `fix`**: This is an interactive workflow. Read the audit results, identify issues, and guide the user through fixes. If the user has a Cloudflare API token (in `$CLOUDFLARE_API_TOKEN` or `~/.claude/email-dns-health/.env`), offer to apply DNS changes automatically via the Cloudflare API. Otherwise, provide the exact DNS records to add/modify manually.
+**For fix requests**: Do NOT call a `fix` script command — there is none. Instead, this is a Claude-driven workflow: run `audit` first to get the full health report, then analyze the issues and recommendations. Guide the user through fixes interactively. If the user has a Cloudflare API token (in `$CLOUDFLARE_API_TOKEN` or `~/.claude/email-dns-health/.env`), offer to apply DNS changes automatically via the Cloudflare API using `curl`. Otherwise, provide the exact DNS records to add/modify manually.
 
 ### Step 5: Follow-up
 
 After presenting results, offer relevant next steps:
-- If issues found: suggest `fix` command
+- If issues found: offer to guide the user through fixing them (see "For fix requests" in Step 4)
 - If SPF lookups high: suggest provider-specific optimizations (read `references/best-practices.md`)
 - If no DMARC: suggest progressive deployment plan
 - If DMARC at `none`: suggest advancing to `quarantine`
@@ -106,11 +105,11 @@ After presenting results, offer relevant next steps:
 |------------|----------|--------------------------|
 | `dig` | Yes | Cannot run any checks - halt and guide installation |
 | `jq` | Yes | Cannot parse results - halt and guide installation |
-| `CLOUDFLARE_API_TOKEN` | No | `fix` command falls back to manual guidance mode |
+| `CLOUDFLARE_API_TOKEN` | No | Fix workflow falls back to manual guidance mode |
 
 ## Completion Report
 
-After `audit` or `fix` commands, present:
+After `audit` or a fix workflow, present:
 
 ```
 [Email DNS Health] Audit Complete
