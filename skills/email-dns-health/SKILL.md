@@ -41,12 +41,16 @@ Run the helper script to check environment readiness:
 bash {SKILL_DIR}/scripts/email-dns-health.sh preflight
 ```
 
-Output is JSON. If `ready` is `true`, proceed. If `false`, follow the `hint` field.
+Output is JSON. If `ready` is `true`, proceed. If `false`, check the `dependencies` object — each entry has a `status` and `hint` field with specific install instructions. The `credentials` object shows optional credential status. Use the table below to resolve each failure:
 
-| Check | Fix |
-|-------|-----|
-| `dig` not found | `brew install bind` (macOS) or `apt install dnsutils` (Linux) |
-| `jq` not found | `brew install jq` (macOS) or `apt install jq` (Linux) |
+| Check | Status | Fix |
+|-------|--------|-----|
+| `dig` missing | `dependencies.dig.status == "missing"` | macOS: `brew install bind` / Linux: `sudo apt install dnsutils` or `sudo yum install bind-utils` |
+| `jq` missing | `dependencies.jq.status == "missing"` | macOS: `brew install jq` / Linux: `sudo apt install jq` or `sudo yum install jq` |
+| Cloudflare token not configured | `credentials.cloudflare_api_token.status == "not_configured"` | Optional. Only needed for automatic DNS fixes. Set `CLOUDFLARE_API_TOKEN` in `~/.claude/email-dns-health/.env` (see `.env.example` for format) |
+| Cloudflare token expired/invalid | `credentials.cloudflare_api_token.status == "expired"` or `"invalid"` | Regenerate at https://dash.cloudflare.com/profile/api-tokens (Zone:DNS:Edit permission), then update `~/.claude/email-dns-health/.env` |
+
+After installing missing dependencies, re-run preflight to confirm `ready: true` before proceeding.
 
 ### Step 2: Determine Command
 
@@ -88,7 +92,12 @@ Format the JSON output into a human-readable report:
 
 **For `setup-guide`**: Read `{SKILL_DIR}/references/provider-configs.md` and present the step-by-step guide for the requested provider.
 
-**For fix requests**: Do NOT call a `fix` script command — there is none. Instead, this is a Claude-driven workflow: run `audit` first to get the full health report, then analyze the issues and recommendations. Guide the user through fixes interactively. If the user has a Cloudflare API token (in `$CLOUDFLARE_API_TOKEN` or `~/.claude/email-dns-health/.env`), offer to apply DNS changes automatically via the Cloudflare API using `curl`. Otherwise, provide the exact DNS records to add/modify manually.
+**For fix requests**: Do NOT call a `fix` script command — there is none. Instead, this is a Claude-driven workflow: run `audit` first to get the full health report, then analyze the issues and recommendations. Guide the user through fixes interactively.
+
+**Cloudflare automatic fixes**: Check preflight's `credentials.cloudflare_api_token.status`. If `"valid"`, offer to apply DNS changes automatically via the Cloudflare API using `curl`. If `"not_configured"`, `"expired"`, or `"invalid"`, provide the exact DNS records to add/modify manually. If the user wants automatic fixes, guide them to configure the token:
+1. Create a token at https://dash.cloudflare.com/profile/api-tokens with **Zone:DNS:Edit** permission
+2. Save it to `~/.claude/email-dns-health/.env` as `CLOUDFLARE_API_TOKEN=<token>` (see `.env.example` for format)
+3. Re-run preflight to validate the token
 
 ### Step 5: Follow-up
 
@@ -142,7 +151,9 @@ Recommendations:
 | `dig` returns SERVFAIL | DNS server issue; try `dig @8.8.8.8 <domain> TXT` |
 | DKIM selector not found | Try common selectors: `default`, `google`, `selector1`, `k1`, `mx` |
 | SPF lookup count exceeds 10 | Use CNAME-based providers (SendGrid, SES) to reduce lookups; read `references/best-practices.md` |
-| Cloudflare API 403 | Token needs `Zone:DNS:Edit` permission; regenerate at dash.cloudflare.com |
+| Cloudflare API 403 | Token needs `Zone:DNS:Edit` permission. Regenerate at https://dash.cloudflare.com/profile/api-tokens, then update `~/.claude/email-dns-health/.env` and re-run preflight |
+| Cloudflare API 401 | Token expired or revoked. Regenerate at https://dash.cloudflare.com/profile/api-tokens, update `~/.claude/email-dns-health/.env`, re-run preflight to validate |
+| Preflight shows `unreachable` for Cloudflare | Network issue. Check internet connectivity. Automatic DNS fixes unavailable; use manual mode instead |
 
 ## References
 

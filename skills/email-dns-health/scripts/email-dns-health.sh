@@ -233,6 +233,32 @@ count_spf_lookups() {
 # ─── Commands ─────────────────────────────────────────────────────────────────
 
 cmd_preflight() {
+  local dig_ok=true jq_ok=true
+
+  if ! command -v dig &>/dev/null; then
+    dig_ok=false
+  fi
+  if ! command -v jq &>/dev/null; then
+    jq_ok=false
+  fi
+
+  # If jq is missing, we cannot use it to format output — use printf instead
+  if [[ "$jq_ok" == "false" ]]; then
+    local dig_status_json
+    if [[ "$dig_ok" == "true" ]]; then
+      local dig_ver
+      dig_ver=$(dig -v 2>&1 | head -1 || echo "unknown")
+      dig_status_json="{\"status\":\"ok\",\"version\":\"$dig_ver\"}"
+    else
+      dig_status_json="{\"status\":\"missing\",\"hint\":\"brew install bind (macOS) or apt install dnsutils (Linux)\"}"
+    fi
+    local jq_status_json="{\"status\":\"missing\",\"hint\":\"brew install jq (macOS) or apt install jq (Linux)\"}"
+    printf '{"ready":false,"dependencies":{"dig":%s,"jq":%s},"credentials":{},"hint":"Missing required dependencies — see each dependency hint for install instructions"}\n' \
+      "$dig_status_json" "$jq_status_json"
+    return
+  fi
+
+  # jq is available — safe to use for formatting
   local dig_status jq_status ready="true"
 
   dig_status=$(check_dep dig)
@@ -241,21 +267,49 @@ cmd_preflight() {
   if echo "$dig_status" | grep -q '"missing"'; then
     ready="false"
   fi
-  if echo "$jq_status" | grep -q '"missing"'; then
-    ready="false"
+
+  # Check optional Cloudflare API token (for DNS fix workflow)
+  # Single canonical config path: ~/.claude/email-dns-health/.env
+  local env_file="$HOME/.claude/email-dns-health/.env"
+  if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]] && [[ -f "$env_file" ]]; then
+    # shellcheck disable=SC1090
+    source "$env_file" 2>/dev/null || true
+  fi
+
+  local cf_token_status
+  if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+    cf_token_status='{"status":"not_configured","required":false,"hint":"Optional. Set CLOUDFLARE_API_TOKEN in ~/.claude/email-dns-health/.env for automatic DNS fixes. Obtain at https://dash.cloudflare.com/profile/api-tokens (Zone:DNS:Edit permission)."}'
+  else
+    # Live validation: test actual API access with a lightweight call
+    local cf_test
+    cf_test=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+      "https://api.cloudflare.com/client/v4/zones?per_page=1" 2>/dev/null || echo "000")
+    if [[ "$cf_test" == "200" ]]; then
+      cf_token_status='{"status":"valid","required":false,"hint":"Cloudflare API token is valid. Automatic DNS fixes available."}'
+    elif [[ "$cf_test" == "403" ]]; then
+      cf_token_status='{"status":"invalid","required":false,"hint":"Cloudflare API token returned 403. Token needs Zone:DNS:Edit permission. Regenerate at https://dash.cloudflare.com/profile/api-tokens and update ~/.claude/email-dns-health/.env"}'
+    elif [[ "$cf_test" == "401" ]]; then
+      cf_token_status='{"status":"expired","required":false,"hint":"Cloudflare API token is expired or revoked. Regenerate at https://dash.cloudflare.com/profile/api-tokens and update ~/.claude/email-dns-health/.env"}'
+    else
+      cf_token_status='{"status":"unreachable","required":false,"hint":"Could not reach Cloudflare API (HTTP '$cf_test'). Check network connectivity. Token will be retested when needed."}'
+    fi
   fi
 
   jq -n \
     --argjson ready "$ready" \
     --argjson dig_dep "$dig_status" \
     --argjson jq_dep "$jq_status" \
+    --argjson cf_token "$cf_token_status" \
     '{
       ready: $ready,
       dependencies: {
         dig: $dig_dep,
         jq: $jq_dep
       },
-      hint: (if $ready then "All checks passed" else "Missing required dependencies" end)
+      credentials: {
+        cloudflare_api_token: $cf_token
+      },
+      hint: (if $ready then "All checks passed" else "Missing required dependencies — see each dependency hint for install instructions" end)
     }'
 }
 
